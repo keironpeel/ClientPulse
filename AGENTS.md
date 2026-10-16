@@ -7,10 +7,33 @@ hours, and generate invoices with localized payment links.
 
 - `backend/` — Laravel 13 (`laravel/framework ^13.17`), own `composer.json` / `package.json` / lockfiles
 - `frontend/` — Next.js 16 App Router, own `package.json` / lockfile
-- No root manifest, no workspaces, no CI, no active git hooks. Run `composer` and `npm` from inside
-  each directory.
+- No root package manifest and no workspaces. There *is* a root `docker-compose.yml` and a
+  root `.env.example`; the root `.env` they copy from is gitignored and configures Compose
+  only, not Laravel. Run `composer` and `npm` from inside each directory. No CI, no active
+  git hooks.
 - Single branch `master`. Commits follow Conventional Commits (`chore: add README and install Laravel Boost`).
 - The two apps do not talk to each other yet — there is no API contract. See "Current state".
+
+## Running the stack
+
+`docker compose up -d --build` brings up `backend`, `frontend`, `postgres`, `redis`, and
+`mailpit` on ports 8000, 3000, 5173, 5432, 8025/1025. See README.md for the port map.
+
+Two consequences worth internalising:
+
+- **`vendor/` and `node_modules/` inside the containers are named volumes, not the host
+  directories.** Run backend tooling through `docker compose exec backend …` and frontend
+  tooling through `docker compose exec frontend …`. Host-side `vendor/bin/pint`,
+  `php artisan test`, and `npx tsc` do not see what the containers use.
+- **The entrypoints reinstall on lockfile change, not on every boot.** They md5sum
+  `composer.lock` / `package-lock.json` against a stamp inside the dependency volume. Editing
+  `composer.json` without running `composer update` will therefore *not* reinstall.
+
+The backend container sets `LARAVEL_SAIL=1` deliberately. `laravel-vite-plugin` keys its
+container behaviour off it: Vite binds `0.0.0.0`, takes its port from `VITE_PORT`, and writes
+`http://localhost:$VITE_PORT` into `public/hot` so the browser can reach the dev server.
+`ServeCommand` also reads it to allow `PHP_CLI_SERVER_WORKERS` without `--no-reload`. This is
+why `vite.config.js` needs no changes; don't "clean up" that variable without replacing it.
 
 ## Generated instruction files — do not hand-edit
 
@@ -40,6 +63,10 @@ There is no CI and no pre-commit hooks, so nothing enforces formatting. Run thes
 - Frontend: `npm run lint` → `npx tsc --noEmit`. There is no `typecheck` script and no frontend test
   runner — no Vitest, no Jest, no `test` script — so `npm test` will not work.
 - Pass `--no-interaction` to every Artisan command.
+- When working against the Compose stack, prefix the working directory: `docker compose exec
+  backend php artisan test --compact`, `docker compose exec frontend npx tsc --noEmit`. Use
+  `vendor/bin/pint --test` there, not `--dirty`: only `backend/` is bind-mounted, so the
+  container has no Git metadata for `--dirty` to diff against.
 
 ## Backend (`cd backend`)
 
@@ -103,8 +130,11 @@ There is no CI and no pre-commit hooks, so nothing enforces formatting. Run thes
 
 The root README is aspirational, not a description of the code. Today there is only the `User` model,
 the three default migrations, and a single `/` route; the frontend is still the untouched
-`create-next-app` scaffold. Trust the code over the README — in particular its claims about Vitest and
-a `docker-compose.yml` are both false.
+`create-next-app` scaffold. Trust the code over the README — in particular its claim about Vitest is
+still false. Its `docker-compose.yml` claim is now true.
 
 There is no API contract yet: no API route group, no auth, and no `NEXT_PUBLIC_*` config on either
-side. Agree on the API surface before wiring frontend to backend.
+side. `docker-compose.yml` passes `NEXT_PUBLIC_API_URL` to the frontend container, but nothing reads
+it yet. Agree on the API surface before wiring frontend to backend. When you do, the browser at
+`localhost:3000` calling `localhost:8000` will need `config/cors.php` published with
+`supports_credentials: true` for the cookie session to survive cross-origin requests.

@@ -1,0 +1,146 @@
+name: clientpulse
+
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: '3'
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-clientpulse}
+      POSTGRES_USER: ${POSTGRES_USER:-clientpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-clientpulse}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *default-logging
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    ports:
+      - '8000:8000'
+      - '5173:5173'
+    volumes:
+      - ./backend:/var/www/html
+      - backend-vendor:/var/www/html/vendor
+      - backend-node-modules:/var/www/html/node_modules
+      - composer-cache:/composer-cache
+    environment:
+      APP_NAME: ${APP_NAME:-ClientPulse}
+      APP_ENV: local
+      APP_DEBUG: 'true'
+      APP_URL: ${APP_URL:-http://localhost:8000}
+
+      # php artisan serve
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: '8000'
+      PHP_CLI_SERVER_WORKERS: '4'
+
+      # laravel-vite-plugin switches to its container behaviour when
+      # LARAVEL_SAIL is set: Vite binds 0.0.0.0, takes its port from VITE_PORT,
+      # and writes http://localhost:$VITE_PORT into public/hot so the browser
+      # (not the container) can reach the dev server.
+      LARAVEL_SAIL: '1'
+      VITE_PORT: '5173'
+
+      LOG_CHANNEL: stack
+      LOG_LEVEL: debug
+
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_DATABASE: ${POSTGRES_DB:-clientpulse}
+      DB_USERNAME: ${POSTGRES_USER:-clientpulse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-clientpulse}
+
+      SESSION_DRIVER: redis
+      CACHE_STORE: redis
+      QUEUE_CONNECTION: redis
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+
+      MAIL_MAILER: smtp
+      MAIL_HOST: mailpit
+      MAIL_PORT: '1025'
+      MAIL_FROM_ADDRESS: hello@clientpulse.test
+      MAIL_FROM_NAME: ${APP_NAME:-ClientPulse}
+
+      FILESYSTEM_DISK: local
+      VITE_APP_NAME: ${APP_NAME:-ClientPulse}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+      - frontend-next:/app/.next
+    environment:
+      NODE_ENV: development
+
+      # Server-side (container to container) and browser-side (public) URLs for
+      # the API. They differ because "backend" only resolves inside Compose.
+      API_URL: http://backend:8000
+      NEXT_PUBLIC_API_URL: ${APP_URL:-http://localhost:8000}
+
+      # Inotify events do not always cross the macOS bind mount. Uncomment both
+      # if file changes stop triggering a rebuild.
+      # CHOKIDAR_USEPOLLING: 'true'
+      # WATCHPACK_POLLING: 'true'
+    depends_on:
+      - backend
+    logging: *default-logging
+
+volumes:
+  backend-vendor:
+  backend-node-modules:
+  composer-cache:
+  frontend-next:
+  frontend-node-modules:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,2 @@
+# Compose configuration, not Laravel's .env
+/.env
