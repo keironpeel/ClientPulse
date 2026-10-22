@@ -17,6 +17,7 @@ export default defineConfig({
         tailwindcss(),
     ],
     server: {
+        allowedHosts: ['backend.clientpulse.orb.local'],
         watch: {
             ignored: ['**/storage/framework/views/**'],
         },
