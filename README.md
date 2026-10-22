@@ -38,6 +38,22 @@ docker compose exec frontend npx tsc --noEmit
 
 Use `vendor/bin/pint --test` rather than `--dirty` inside the container: only
 `backend/` is mounted, so there is no Git metadata for `--dirty` to diff against.
+
+## Authentication
+
+Auth uses Sanctum **personal access tokens** (bearer tokens) with a Next.js
+Backend-for-Frontend pattern:
+
+- The Laravel API issues a token on register/login (`POST /api/auth/register`,
+  `POST /api/auth/login`) and revokes it on `POST /api/auth/logout`.
+- The Next.js server stores the token in an httpOnly, `Secure`, `__Host-`-prefixed
+  cookie (`auth_token`) and attaches it as `Authorization: Bearer <token>` on every
+  request to the API. The token never reaches the browser.
+- No session/CSRF SPA auth is used: `config/sanctum.php` sets `guard => []` and
+  `config/cors.php` has `supports_credentials => false`.
+
+Frontend auth helpers live in `frontend/lib/api.ts` (`apiFetch`, `getUser`) and
+`frontend/lib/auth.ts` (`logout`).
 Run `--dirty` on the host, where your own `vendor/` lives.
 
 Composer and npm dependencies live in Docker volumes rather than on your machine,
